@@ -17,19 +17,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut client = LlmClient::new(config);
 
     let message = Message::from_user("Hi! what is your name?".to_string());
-    client.send_message(message).await?;
+    client.send_chat_message(message).await?;
 
     let follow_up_message = Message::from_user(
         "It's nice to meet you. Can you tell me something about something about something?"
             .to_string(),
     );
-    client.send_message(follow_up_message).await?;
+    client.send_chat_message(follow_up_message).await?;
 
     let confirming_message = Message::from_user(
         "Thank you for that. Now can you please tell me everything we've just discussed?"
             .to_string(),
     );
-    client.send_message(confirming_message).await?;
+    client.send_chat_message(confirming_message).await?;
 
     client.log_message_history();
 
@@ -37,8 +37,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn setup_tracing() {
-    let default_filter = EnvFilter::from_default_env();
-    let json_layer = trace_fmt::layer().json().with_filter(default_filter);
+    let filter = EnvFilter::try_new("info,aipi=trace,reqwest=warn,hyper=warn").unwrap();
+    let json_layer = trace_fmt::layer().json().with_filter(filter);
 
     tracing_subscriber::registry().with(json_layer).init();
 }

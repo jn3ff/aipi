@@ -63,37 +63,15 @@ impl LlmClient {
         }
     }
 
-    async fn handle_response(
-        &mut self,
-        antecedent: MessageBundle,
-        response: Response,
-    ) -> Result<(), LlmClientError> {
-        debug!("Unwrapping response: {response:?}");
-        let content = response
-            .text()
-            .await
-            .map_err(|e| LlmClientError::ExtractContent(e.to_string()))?;
-
-        debug!("Deserializing and converting response content: {content:?}");
-
-        let wrapped_response = ModelResponseWrapper::parse_new(content, &self.config)
-            .map_err(|e| LlmClientError::ParseResponse(e.to_string()))?;
-
-        debug!("Wrapped response {wrapped_response:?}");
-        // build message from parsed & wrapped response
-        let message = Message::from(wrapped_response);
-        let message_metadata = MessageMetadata::new(&self.config);
-        let message_bundle = MessageBundle::new(message, message_metadata);
-
-        // update history if repsonse handling is successful
-        self.message_history.push(antecedent);
-        self.message_history.push(message_bundle);
-        Ok(())
+    fn bundle_message(&self, message: Message) -> MessageBundle {
+        MessageBundle::new(message, MessageMetadata::new(&self.config))
     }
 
-    pub async fn send_message(&mut self, message: Message) -> Result<(), LlmClientError> {
-        let bundle = MessageBundle::new(message, MessageMetadata::new(&self.config));
-        let wrapped_request = ModelRequestWrapper::new(&bundle, self);
+    async fn send_message_bundle(
+        &mut self,
+        bundle: &MessageBundle,
+    ) -> Result<Response, LlmClientError> {
+        let wrapped_request = ModelRequestWrapper::new(bundle, self);
         let payload = wrapped_request.to_payload();
 
         debug!("Payload being sent {payload:?}");
@@ -110,8 +88,49 @@ impl LlmClient {
             .await
             .map_err(|e| LlmClientError::Request(e.to_string()))?;
 
-        self.handle_response(bundle, response).await?;
+        Ok(response)
+    }
+    async fn extract_response(
+        &mut self,
+        response: Response,
+    ) -> Result<MessageBundle, LlmClientError> {
+        debug!("Unwrapping response: {response:?}");
+        let content = response
+            .text()
+            .await
+            .map_err(|e| LlmClientError::ExtractContent(e.to_string()))?;
+
+        debug!("Deserializing and converting response content: {content:?}");
+
+        let wrapped_response = ModelResponseWrapper::parse_new(content, &self.config)
+            .map_err(|e| LlmClientError::ParseResponse(e.to_string()))?;
+
+        debug!("Wrapped response {wrapped_response:?}");
+        // build message from parsed & wrapped response
+        let message = Message::from(wrapped_response);
+        let message_metadata = MessageMetadata::new(&self.config);
+        Ok(MessageBundle::new(message, message_metadata))
+    }
+
+    pub async fn send_chat_message(&mut self, message: Message) -> Result<(), LlmClientError> {
+        let bundle = self.bundle_message(message);
+        let response = self.send_message_bundle(&bundle).await?;
+        let response_bundle = self.extract_response(response).await?;
+
+        // update history if response handling is successful
+        self.message_history.push(bundle);
+        self.message_history.push(response_bundle);
         Ok(())
+    }
+
+    pub async fn send_adhoc_message(
+        &mut self,
+        message: Message,
+    ) -> Result<MessageBundle, LlmClientError> {
+        let bundle = self.bundle_message(message);
+        let response = self.send_message_bundle(&bundle).await?;
+        let response_bundle = self.extract_response(response).await?;
+        Ok(response_bundle)
     }
 
     pub fn log_message_history(&self) {
