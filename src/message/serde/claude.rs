@@ -1,10 +1,8 @@
 use crate::{
-    message::{Message, serde::MessageList},
-    models::Role,
+    client::LlmClient,
+    message::{Message, MessageBundle, serde::MessageList},
 };
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
-
-use super::LlmClient;
 
 /// Mod purpose:
 /// Specifically implement the guts of a claude interaction according to anthropic's API spec
@@ -12,10 +10,9 @@ use super::LlmClient;
 #[derive(Debug, Clone)]
 pub(crate) struct ClaudeRequest<'a> {
     pub(crate) client: &'a LlmClient,
-    pub(crate) next: &'a Message,
+    pub(crate) next: &'a MessageBundle,
 }
 
-// jfc this function makes me want to die
 impl<'a> Serialize for ClaudeRequest<'a> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -23,11 +20,12 @@ impl<'a> Serialize for ClaudeRequest<'a> {
     {
         let mut st = serializer.serialize_struct(
             "ClaudeRequest",
-            3 + usize::from(self.client.config.system_prompt.is_some()),
+            4 + usize::from(self.client.config.system_prompt.is_some()),
         )?;
 
         st.serialize_field("model", &self.client.config.model.to_model_string())?;
         st.serialize_field("max_tokens", &self.client.config.max_tokens)?;
+        st.serialize_field("temperature", &self.client.config.temperature)?;
         if let Some(sys) = &self.client.config.system_prompt {
             st.serialize_field("system", sys)?;
         }
@@ -36,7 +34,7 @@ impl<'a> Serialize for ClaudeRequest<'a> {
             "messages",
             &MessageList {
                 prev: &self.client.message_history,
-                message: &self.next,
+                next: self.next,
                 model: &self.client.config.model,
             },
         )?;
@@ -45,8 +43,8 @@ impl<'a> Serialize for ClaudeRequest<'a> {
     }
 }
 
-impl From<ClaudeResponse> for Message {
-    fn from(mut value: ClaudeResponse) -> Self {
+impl Message {
+    pub(crate) fn from_claude_response(mut value: ClaudeResponse) -> Self {
         let content = value
             .content
             .pop()
@@ -56,13 +54,13 @@ impl From<ClaudeResponse> for Message {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub(crate) struct ClaudeContent {
     pub(crate) r#type: String,
     pub(crate) text: String,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub(crate) struct ClaudeResponse {
     pub(crate) content: Vec<ClaudeContent>,
 }

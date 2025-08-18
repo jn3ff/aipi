@@ -1,5 +1,7 @@
 pub mod serde;
 
+use std::{error::Error, fmt::Display};
+
 use chrono::{TimeZone, Utc};
 
 use crate::models::{ModelConfig, Role};
@@ -15,6 +17,10 @@ use crate::models::{ModelConfig, Role};
 /// we can cleanly serde from any llm provider with a chat-global model param.
 /// The negative of this decision is we lose some history functionality. We can gain this back in a handful of ways once a need is found for it
 /// Essentially boiling down to parallel metadata record in a message bundle being kept as historical data against a client
+///
+/// 2025-08-15: decided to go with "MessageBundle" as the primary unit of transfer within the crate, with client exposing a clean interface to Message.
+/// I'm starting to feel like I'm reinventing two wheels simultaneously, but I think it makes sense to have the client hold some persistent notion of config
+/// so we can "swap" at the client level, with config at the message level used for historical reference only.
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Message {
@@ -57,7 +63,7 @@ impl MessageTimestamp {
 #[derive(Debug, Clone)]
 pub struct MessageMetadata {
     timestamp: MessageTimestamp,
-    used_config: ModelConfig,
+    config: ModelConfig,
 }
 
 // TODO-5: Metadata integrates with the notion of chat history simply, but not efficiently
@@ -68,10 +74,10 @@ pub struct MessageMetadata {
 // or this code is used in a highly parallel application
 // we may prefer to implement it that way
 impl MessageMetadata {
-    pub fn new(used_config: &ModelConfig) -> Self {
+    pub fn new(config: &ModelConfig) -> Self {
         MessageMetadata {
             timestamp: MessageTimestamp::now(),
-            used_config: used_config.clone(),
+            config: config.clone(),
         }
     }
 }
@@ -87,3 +93,16 @@ impl MessageBundle {
         MessageBundle { message, metadata }
     }
 }
+
+#[derive(Debug, Clone)]
+pub enum MessageError {
+    Parse(String),
+}
+
+impl Display for MessageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("self:?"))
+    }
+}
+
+impl Error for MessageError {}

@@ -1,13 +1,14 @@
-pub mod claude;
-
 use std::{error::Error, fmt::Display};
 
-use claude::{ClaudeRequest, ClaudeResponse};
 use reqwest::{RequestBuilder, Response};
 use secrecy::ExposeSecret;
+use tracing::{Instrument, debug, info, trace};
 
 use crate::{
-    message::{Message, MessageBundle, MessageMetadata},
+    message::{
+        Message, MessageBundle, MessageMetadata,
+        serde::{ModelRequestWrapper, ModelResponseWrapper},
+    },
     models::{Model, ModelConfig},
 };
 
@@ -28,30 +29,37 @@ impl Error for LlmClientError {}
 
 #[derive(Debug, Clone)]
 pub struct LlmClient {
-    message_history: Vec<MessageBundle>,
-    config: ModelConfig,
-    client: reqwest::Client,
+    pub message_history: Vec<MessageBundle>,
+    pub config: ModelConfig,
+    pub(crate) client: reqwest::Client,
 }
 
 impl LlmClient {
     pub fn new(config: ModelConfig) -> LlmClient {
-        LlmClient {
-            message_history: Vec::new(),
-            config,
-            client: reqwest::Client::new(),
-        }
-    }
-
-    fn to_payload(&self, message: &Message) -> String {
-        match self.config.model {
-            Model::Claude(_) => {
-                let req = ClaudeRequest {
-                    client: self,
-                    next: message,
-                };
-                serde_json::to_string(&req).expect("correct serialization impl'd")
+        match config.model {
+            // openai doesn't have system at the message level, it comes as the first in the stream of messages
+            Model::ChatGpt(_) => {
+                let mut history: Vec<MessageBundle> = Vec::new();
+                if let Some(sys_prompt) = config.system_prompt.as_ref() {
+                    let system_message = MessageBundle::new(
+                        Message::from_system(sys_prompt.clone()),
+                        MessageMetadata::new(&config),
+                    );
+                    history.push(system_message);
+                }
+                LlmClient {
+                    message_history: history,
+                    config,
+                    client: reqwest::Client::new(),
+                }
             }
-            _ => todo!(),
+            // probably Gemini just slides up into this block
+            Model::Claude(_) => LlmClient {
+                message_history: Vec::new(),
+                config,
+                client: reqwest::Client::new(),
+            },
+            Model::Gemini(_) => todo!("gem"),
         }
     }
 
@@ -60,35 +68,44 @@ impl LlmClient {
         antecedent: MessageBundle,
         response: Response,
     ) -> Result<(), LlmClientError> {
+        debug!("Unwrapping response: {response:?}");
         let content = response
             .text()
             .await
             .map_err(|e| LlmClientError::ExtractContent(e.to_string()))?;
-        match self.config.model {
-            Model::Claude(_) => {
-                let response = serde_json::from_str::<ClaudeResponse>(content.as_str())
-                    .map_err(|e| LlmClientError::ParseResponse(e.to_string()))?;
-                let message = Message::from(response);
-                let message_metadata = MessageMetadata::new(&self.config);
 
-                // update history if repsonse handling is successful
-                self.message_history.push(antecedent);
-                self.message_history
-                    .push(MessageBundle::new(message, message_metadata));
-            }
-            Model::ChatGpt(_) => todo!(),
-        }
+        debug!("Deserializing and converting response content: {content:?}");
+
+        let wrapped_response = ModelResponseWrapper::parse_new(content, &self.config)
+            .map_err(|e| LlmClientError::ParseResponse(e.to_string()))?;
+
+        debug!("Wrapped response {wrapped_response:?}");
+        // build message from parsed & wrapped response
+        let message = Message::from(wrapped_response);
+        let message_metadata = MessageMetadata::new(&self.config);
+        let message_bundle = MessageBundle::new(message, message_metadata);
+
+        // update history if repsonse handling is successful
+        self.message_history.push(antecedent);
+        self.message_history.push(message_bundle);
         Ok(())
     }
 
     pub async fn send_message(&mut self, message: Message) -> Result<(), LlmClientError> {
         let bundle = MessageBundle::new(message, MessageMetadata::new(&self.config));
-        let payload = self.to_payload(&bundle.message);
+        let wrapped_request = ModelRequestWrapper::new(&bundle, self);
+        let payload = wrapped_request.to_payload();
+
+        debug!("Payload being sent {payload:?}");
+
         let response = self
             .client
             .post(self.config.model.to_target_url())
             .with_model_headers(&self.config)
             .body(payload)
+            .inspect(|rb| {
+                debug!("Inspecting built request before sending: {rb:?}");
+            })
             .send()
             .await
             .map_err(|e| LlmClientError::Request(e.to_string()))?;
@@ -97,13 +114,14 @@ impl LlmClient {
         Ok(())
     }
 
-    pub fn print_message_history(&self) {
-        println!("{:?}", self.message_history);
+    pub fn log_message_history(&self) {
+        info!("Message history: {:?}", self.message_history);
     }
 }
 
 pub trait WithModelHeaders {
     fn with_model_headers(self, config: &ModelConfig) -> Self;
+    fn inspect(self, f: fn(s: &Self) -> ()) -> Self;
 }
 
 impl WithModelHeaders for RequestBuilder {
@@ -113,7 +131,15 @@ impl WithModelHeaders for RequestBuilder {
                 .header("x-api-key", config.token.expose_secret())
                 .header("anthropic-version", config.model.to_api_version())
                 .header("content-type", "application/json"),
-            Model::ChatGpt(_) => todo!(),
+            Model::ChatGpt(_) => self
+                .bearer_auth(config.token.expose_secret())
+                .header("content-type", "application/json"),
+            Model::Gemini(_) => todo!("gem"),
         }
+    }
+
+    fn inspect(self, f: fn(s: &Self) -> ()) -> Self {
+        f(&self);
+        self
     }
 }

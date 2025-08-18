@@ -1,5 +1,5 @@
 use std::{
-    env,
+    env::{self, VarError},
     fmt::Display,
     sync::{
         LazyLock, RwLock,
@@ -17,10 +17,16 @@ static ENVIRONMENT: LazyLock<RwLock<AiPiEnvironment>> =
 /// Determines if environment needs reloading
 static RELOAD_NEEDED: AtomicBool = AtomicBool::new(false);
 
+// TODO-4: make these overridable with a registry
+const API_KEY_ANTHROPIC: &str = "API_KEY_ANTHROPIC";
+const API_KEY_OPENAI: &str = "API_KEY_OPENAI";
+const API_KEY_GOOGLE: &str = "API_KEY_GOOGLE";
+
 #[derive(Clone, Debug)]
 struct AiPiEnvironment {
     anthropic_key: Option<SecretString>,
     openai_key: Option<SecretString>,
+    google_key: Option<SecretString>,
 }
 
 impl Display for AiPiEnvironment {
@@ -32,11 +38,13 @@ impl Display for AiPiEnvironment {
 
 impl AiPiEnvironment {
     pub fn new() -> Self {
-        // suppress error as .env is not the only place we can load our env
+        // suppress error as .env is not the only place we can set our env, e.g. the actual environment
         let _ = dotenv::dotenv();
+        let map_secret = |s: Result<String, VarError>| s.ok().map(SecretString::from);
         AiPiEnvironment {
-            anthropic_key: env::var("API_KEY_ANTHROPIC").ok().map(SecretString::from),
-            openai_key: env::var("API_KEY_OPENAI").ok().map(SecretString::from),
+            anthropic_key: map_secret(env::var(API_KEY_ANTHROPIC)),
+            openai_key: map_secret(env::var(API_KEY_OPENAI)),
+            google_key: map_secret(env::var(API_KEY_OPENAI)),
         }
     }
 }
@@ -53,12 +61,13 @@ pub fn get_api_key(model: &Model) -> Result<SecretString, String> {
 
     let rguard = ENVIRONMENT.read().expect("Guard poisoned");
 
-    match model {
-        Model::Claude(_) => stateful_retrieve_key(&rguard.anthropic_key)
-            .map_err(|_| String::from("Must set API_KEY_ANTHROPIC in your env")),
-        Model::ChatGpt(_) => stateful_retrieve_key(&rguard.openai_key)
-            .map_err(|_| String::from("Must set API_KEY_OPENAI in your env")),
-    }
+    let (key, env_var) = match model {
+        Model::Claude(_) => (&rguard.anthropic_key, API_KEY_ANTHROPIC),
+        Model::ChatGpt(_) => (&rguard.openai_key, API_KEY_OPENAI),
+        Model::Gemini(_) => (&rguard.google_key, API_KEY_GOOGLE),
+    };
+
+    stateful_retrieve_key(key).map_err(|_| format!("Must set {env_var} in your env"))
 }
 
 fn stateful_retrieve_key(key: &Option<SecretString>) -> Result<SecretString, ()> {

@@ -12,6 +12,7 @@ use crate::environment::get_api_key;
 pub enum Model {
     Claude(ClaudeVersion),
     ChatGpt(ChatGptVersion),
+    Gemini(GeminiVersion),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -24,6 +25,11 @@ pub enum ChatGptVersion {
     Gpt5,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum GeminiVersion {
+    Idk,
+}
+
 impl Model {
     pub fn to_model_string(&self) -> &'static str {
         match self {
@@ -33,21 +39,24 @@ impl Model {
             Model::ChatGpt(ver) => match ver {
                 ChatGptVersion::Gpt5 => "gpt-5",
             },
+            Model::Gemini(_) => todo!("gem"),
         }
     }
 
     // TODO-4: add "mode" so we can spec within-model
-    pub fn to_target_url(&self) -> &'static str {
+    pub(crate) fn to_target_url(&self) -> &'static str {
         match self {
             Model::Claude(_) => "https://api.anthropic.com/v1/messages",
-            _ => todo!(),
+            Model::ChatGpt(_) => "https://api.openai.com/v1/chat/completions",
+            _ => todo!("gem"),
         }
     }
 
-    pub fn to_api_version(&self) -> &'static str {
+    pub(crate) fn to_api_version(&self) -> &'static str {
         match self {
             Model::Claude(_) => "2023-06-01",
-            _ => todo!(),
+            Model::ChatGpt(_) => panic!("internal unreachable, not relevant param for chatgpt"),
+            _ => todo!("gem"),
         }
     }
 }
@@ -74,6 +83,7 @@ impl Role {
                     Role::System => "developer".to_string(),
                 },
             },
+            _ => todo!("gem"),
         }
     }
 }
