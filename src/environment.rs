@@ -18,9 +18,9 @@ static ENVIRONMENT: LazyLock<RwLock<AiPiEnvironment>> =
 static RELOAD_NEEDED: AtomicBool = AtomicBool::new(false);
 
 // TODO-4: make these overridable with a registry
-const API_KEY_ANTHROPIC: &str = "API_KEY_ANTHROPIC";
-const API_KEY_OPENAI: &str = "API_KEY_OPENAI";
-const API_KEY_GOOGLE: &str = "API_KEY_GOOGLE";
+pub const API_KEY_ANTHROPIC: &str = "API_KEY_ANTHROPIC";
+pub const API_KEY_OPENAI: &str = "API_KEY_OPENAI";
+pub const API_KEY_GOOGLE: &str = "API_KEY_GOOGLE";
 
 #[derive(Clone, Debug)]
 struct AiPiEnvironment {
@@ -65,6 +65,8 @@ pub fn get_api_key(model: &Model) -> Result<SecretString, String> {
         Model::Claude(_) => (&rguard.anthropic_key, API_KEY_ANTHROPIC),
         Model::ChatGpt(_) => (&rguard.openai_key, API_KEY_OPENAI),
         Model::Gemini(_) => (&rguard.google_key, API_KEY_GOOGLE),
+        #[cfg(feature = "dev-tools")]
+        _ => panic!("dev tools only"),
     };
 
     stateful_retrieve_key(key).map_err(|_| format!("Must set {env_var} in your env"))

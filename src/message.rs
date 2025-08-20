@@ -2,7 +2,7 @@ pub mod serde;
 
 use std::{error::Error, fmt::Display};
 
-use chrono::{TimeZone, Utc};
+use chrono::Utc;
 
 use crate::models::{ModelConfig, Role};
 

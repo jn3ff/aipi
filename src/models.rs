@@ -1,3 +1,8 @@
+#[cfg(feature = "dev-tools")]
+pub mod maintenance;
+#[cfg(feature = "dev-tools")]
+use strum_macros::EnumIter;
+
 use std::{error::Error, fmt::Display};
 
 use secrecy::SecretString;
@@ -8,38 +13,80 @@ use crate::environment::get_api_key;
 /// Single enumeration place for all specific implementations by model
 /// The goal is to add/extend support for any support by being able to only touch this file, add environment.rs, & add an llm/newthing for it.
 
+#[cfg_attr(feature = "dev-tools", derive(EnumIter))]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Model {
     Claude(ClaudeVersion),
     ChatGpt(ChatGptVersion),
     Gemini(GeminiVersion),
+    #[cfg(feature = "dev-tools")]
+    None,
 }
 
+#[cfg_attr(feature = "dev-tools", derive(EnumIter))]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClaudeVersion {
     Sonnet4,
+    None,
 }
 
+#[cfg_attr(feature = "dev-tools", derive(EnumIter))]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChatGptVersion {
     Gpt5,
+    None,
 }
 
+#[cfg_attr(feature = "dev-tools", derive(EnumIter))]
 #[derive(Debug, Clone, PartialEq)]
 pub enum GeminiVersion {
-    Idk,
+    None,
+}
+
+#[cfg(feature = "dev-tools")]
+impl Default for Model {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+#[cfg(feature = "dev-tools")]
+impl Default for ClaudeVersion {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+#[cfg(feature = "dev-tools")]
+impl Default for ChatGptVersion {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+#[cfg(feature = "dev-tools")]
+impl Default for GeminiVersion {
+    fn default() -> Self {
+        Self::None
+    }
 }
 
 impl Model {
-    pub fn to_model_string(&self) -> &'static str {
+    pub fn to_model_string(&self) -> Option<&'static str> {
         match self {
             Model::Claude(ver) => match ver {
-                ClaudeVersion::Sonnet4 => "claude-sonnet-4-20250514",
+                ClaudeVersion::Sonnet4 => Some("claude-sonnet-4-20250514"),
+                ClaudeVersion::None => None,
             },
             Model::ChatGpt(ver) => match ver {
-                ChatGptVersion::Gpt5 => "gpt-5",
+                ChatGptVersion::Gpt5 => Some("gpt-5"),
+                ChatGptVersion::None => None,
             },
-            Model::Gemini(_) => todo!("gem"),
+            Model::Gemini(ver) => match ver {
+                GeminiVersion::None => None,
+            },
+            #[cfg(feature = "dev-tools")]
+            Model::None => panic!("dev-tools only"),
         }
     }
 
@@ -77,7 +124,7 @@ impl Role {
                 Role::System => "system".to_string(), // TODO-2: this might not be correct in Claude spec and this function may need to return a result instead
             },
             Model::ChatGpt(ver) => match ver {
-                ChatGptVersion::Gpt5 => match self {
+                ChatGptVersion::Gpt5 | ChatGptVersion::None => match self {
                     Role::User => "user".to_string(),
                     Role::Ai => "assistant".to_string(),
                     Role::System => "developer".to_string(),

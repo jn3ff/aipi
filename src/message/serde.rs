@@ -119,6 +119,8 @@ impl ModelResponseWrapper {
                     .map_err(|e| MessageError::Parse(e.to_string()))?,
             ),
             Model::Gemini(_) => todo!("gem"),
+            #[cfg(feature = "dev-tools")]
+            _ => panic!("dev tools only"),
         };
 
         Ok(wrapped)

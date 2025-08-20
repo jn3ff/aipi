@@ -2,7 +2,7 @@ use std::{error::Error, fmt::Display};
 
 use reqwest::{RequestBuilder, Response};
 use secrecy::ExposeSecret;
-use tracing::{Instrument, debug, info, trace};
+use tracing::{debug, info};
 
 use crate::{
     message::{
@@ -34,6 +34,7 @@ pub struct LlmClient {
     pub(crate) client: reqwest::Client,
 }
 
+// pubs
 impl LlmClient {
     pub fn new(config: ModelConfig) -> LlmClient {
         match config.model {
@@ -60,9 +61,41 @@ impl LlmClient {
                 client: reqwest::Client::new(),
             },
             Model::Gemini(_) => todo!("gem"),
+            #[cfg(feature = "dev-tools")]
+            Model::None => panic!("dev tools only"),
         }
     }
 
+    /// message with adding to client's message history (useful for multisequenced interactions)
+    pub async fn send_chat_message(&mut self, message: Message) -> Result<(), LlmClientError> {
+        let bundle = self.bundle_message(message);
+        let response = self.send_message_bundle(&bundle).await?;
+        let response_bundle = self.extract_response(response).await?;
+
+        // update history if response handling is successful
+        self.message_history.push(bundle);
+        self.message_history.push(response_bundle);
+        Ok(())
+    }
+
+    /// message without adding to client's message history (useful if you don't care about history)
+    pub async fn send_adhoc_message(
+        &mut self,
+        message: Message,
+    ) -> Result<MessageBundle, LlmClientError> {
+        let bundle = self.bundle_message(message);
+        let response = self.send_message_bundle(&bundle).await?;
+        let response_bundle = self.extract_response(response).await?;
+        Ok(response_bundle)
+    }
+
+    pub fn log_message_history(&self) {
+        info!("Message history: {:?}", self.message_history);
+    }
+}
+
+// private
+impl LlmClient {
     fn bundle_message(&self, message: Message) -> MessageBundle {
         MessageBundle::new(message, MessageMetadata::new(&self.config))
     }
@@ -111,31 +144,6 @@ impl LlmClient {
         let message_metadata = MessageMetadata::new(&self.config);
         Ok(MessageBundle::new(message, message_metadata))
     }
-
-    pub async fn send_chat_message(&mut self, message: Message) -> Result<(), LlmClientError> {
-        let bundle = self.bundle_message(message);
-        let response = self.send_message_bundle(&bundle).await?;
-        let response_bundle = self.extract_response(response).await?;
-
-        // update history if response handling is successful
-        self.message_history.push(bundle);
-        self.message_history.push(response_bundle);
-        Ok(())
-    }
-
-    pub async fn send_adhoc_message(
-        &mut self,
-        message: Message,
-    ) -> Result<MessageBundle, LlmClientError> {
-        let bundle = self.bundle_message(message);
-        let response = self.send_message_bundle(&bundle).await?;
-        let response_bundle = self.extract_response(response).await?;
-        Ok(response_bundle)
-    }
-
-    pub fn log_message_history(&self) {
-        info!("Message history: {:?}", self.message_history);
-    }
 }
 
 pub trait WithModelHeaders {
@@ -154,6 +162,8 @@ impl WithModelHeaders for RequestBuilder {
                 .bearer_auth(config.token.expose_secret())
                 .header("content-type", "application/json"),
             Model::Gemini(_) => todo!("gem"),
+            #[cfg(feature = "dev-tools")]
+            Model::None => panic!("dev-tools only"),
         }
     }
 
